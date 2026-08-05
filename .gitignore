@@ -1,0 +1,6 @@
+.env
+.venv/
+__pycache__/
+jobs/
+test_source_gujarati.txt
+*.pyc
