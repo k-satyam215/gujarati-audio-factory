@@ -37,7 +37,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>Gujarati Audio F
 <h1>Gujarati Audio Factory</h1><p>Upload a textbook PDF or paste content. The app creates a source-grounded, natural two-host Gujarati teaching audio and its transcript.</p>
 <form action=/generate method=post enctype=multipart/form-data><label>PDF or TXT source (optional)</label><input type=file name=file accept=".pdf,.txt,.md">
 <label>Or paste textbook content (optional)</label><textarea name=content rows=8 placeholder="Paste the question and answer, or chapter content here"></textarea>
-<label>Question or topic to explain</label><input name=question required placeholder="e.g., પ્રશ્ન 9: સંતાનમાં બે વિકલ્પો શા માટે હોય છે?"><div class=row><label>Length<select name=length><option value=default>Default (about 6-9 min)</option><option value=short>Short (about 3-4 min)</option><option value=maximum>Full chapter / Maximum (source-aware)</option></select></label><label>Output name<input name=title value="gujarati_audio_overview"></label></div>
+<label>Question or topic to explain</label><input name=question required placeholder="e.g., પ્રશ્ન 9: સંતાનમાં બે વિકલ્પો શા માટે હોય છે?"><div class=row><label>Length<select name=length><option value=default>Default — gentle child-friendly pace (about 7-10 min)</option><option value=short>Short — gentle pace (about 4-5 min)</option><option value=maximum>Full chapter / Maximum (source-aware)</option></select></label><label>Output name<input name=title value="gujarati_audio_overview"></label></div>
 <button type=submit>Generate audio</button></form><p><small>Requires GEMINI_API_KEY in .env. Generation can take several minutes. Do not close the request page.</small></p></body></html>"""
 
 def client() -> genai.Client:
@@ -82,8 +82,8 @@ def source_part(c: genai.Client, path: Path | None, pasted: str):
 
 def script_prompt(question: str, length: str) -> str:
     targets = {
-        "short": "450 to 600",
-        "default": "1,000 to 1,250",
+        "short": "320 to 420",
+        "default": "700 to 850",
         "maximum": "the longest complete, non-repetitive explanation the source genuinely needs (for a full chapter, normally 3,500 to 5,000; for a short source, stay proportional and do not pad)",
     }
     target = targets.get(length, targets["default"])
@@ -92,7 +92,7 @@ def script_prompt(question: str, length: str) -> str:
 
 Output ONLY the spoken transcript. Use exactly two speakers named Host A and Host B, with every turn formatted `Host A:` or `Host B:`.
 
-It must sound like a soft, warm, unhurried conversation between two friends—not a classroom reading and not mechanical speaker-by-speaker alternation. Host A is a calm, affectionate explainer. Host B is a genuinely curious learner who listens, responds to the immediately previous point, occasionally thinks aloud, and asks only useful follow-up questions. Vary the turn lengths naturally: most are one to three sentences; a few can be longer. Use reactions such as હા, એક મિનિટ, અરે વાહ, સાચી વાત, and exactly only when emotionally natural. Never force a reaction into every turn. Avoid repeated greetings, generic filler, slogans, or sentences such as “ચાલો મિત્રો”.
+It must sound like a soft, warm, unhurried conversation between two friends—not a classroom reading and not mechanical speaker-by-speaker alternation. Host A is a calm, affectionate explainer. Host B is a genuinely curious learner who listens, responds to the immediately previous point, occasionally thinks aloud, and asks only useful follow-up questions. Write extra clear, short sentences for Host B; avoid packing many ideas into one line. Vary the turn lengths naturally: most are one to three sentences; a few can be longer. Use reactions such as હા, એક મિનિટ, અરે વાહ, સાચી વાત, and exactly only when emotionally natural. Never force a reaction into every turn. Avoid repeated greetings, generic filler, slogans, or sentences such as “ચાલો મિત્રો”.
 
 Begin with one relatable daily-life observation. Unpack difficult terms one at a time, use only source-grounded examples, and end with a concise exam-ready recap. {coverage} Do not invent facts, references, medical claims, or extra questions. Keep Gujarati script throughout except familiar terms such as DNA when helpful."""
 
@@ -124,7 +124,7 @@ def tts(c: genai.Client, script: str, wav_path: Path) -> None:
     )
     pcm = bytearray()
     for index, chunk in enumerate(split_script(script), start=1):
-        direction = "Read this as a very soft, sweet, warm Gujarati conversation between two close friends. Speak noticeably slower than a classroom explanation: relaxed, clear, and never rushed. Host A has a gentle, reassuring smile in the voice; Host B sounds calm, curious, and comfortable. Leave a brief natural pause after an important idea or a genuine reaction, but never add long silence. Use subtle emotion and smooth sentence endings. Never sound like an announcement, a textbook, a debate, or a fast AI narration. Do not announce speaker labels.\n\n"
+        direction = "Read this as a very soft, sweet, warm Gujarati conversation between two close friends for a school child. Use a deliberately gentle pace, around 90 to 105 words per minute. This is essential: Host B must be especially slow, clear, patient, and easy to follow, never speaking quickly or running words together. Give one small natural pause between sentences and a slightly longer pause after a new scientific idea. Host A has a gentle, reassuring smile in the voice; Host B sounds calm, curious, and comfortable. Use subtle emotion and smooth sentence endings. Never sound like an announcement, a textbook, a debate, or a fast AI narration. Do not announce speaker labels.\n\n"
         response = with_retry(
             lambda: c.models.generate_content(model=TTS_MODEL, contents=direction + chunk, config=config),
             f"Audio generation for part {index}",
