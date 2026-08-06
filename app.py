@@ -26,8 +26,10 @@ JOBS = ROOT / "jobs"
 JOBS.mkdir(exist_ok=True)
 TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.6-flash")
 TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
-HOST_A_VOICE = os.getenv("HOST_A_VOICE", "Aoede")
-HOST_B_VOICE = os.getenv("HOST_B_VOICE", "Gacrux")
+HOST_A_VOICE = os.getenv("HOST_A_VOICE", "Sulafat")
+HOST_B_VOICE = os.getenv("HOST_B_VOICE", "Charon")
+HOST_A_NAME = "Meera"
+HOST_B_NAME = "Arjun"
 
 app = FastAPI(title="Gujarati Audio Factory")
 app.mount("/jobs", StaticFiles(directory=JOBS), name="jobs")
@@ -110,21 +112,64 @@ def split_script(script: str, maximum: int = 9000) -> list[str]:
         chunks.append(current)
     return chunks
 
+def script_prompt(question: str, length: str) -> str:
+    """Generate a transcript with natural turns before TTS sees it."""
+    targets = {
+        "short": "450 to 600",
+        "default": "1,000 to 1,250",
+        "maximum": "the longest complete, non-repetitive explanation the source genuinely needs (for a full chapter, normally 3,500 to 5,000; for a short source, stay proportional and do not pad)",
+    }
+    target = targets.get(length, targets["default"])
+    coverage = "Cover every relevant section and example in the supplied source; do not artificially shorten it, but do not pad, repeat, or invent material." if length == "maximum" else "Focus tightly on the stated topic and source-grounded examples."
+    return f"""You are an expert Gujarati school science educator. Based only on the supplied source, write a {target}-word Gujarati podcast transcript answering: {question}.
+
+Output ONLY spoken lines. Use exactly two speakers called {HOST_A_NAME} and {HOST_B_NAME}; format every turn exactly `{HOST_A_NAME}:` or `{HOST_B_NAME}:`.
+
+This must feel like a gentle after-school chat, never a lesson being read aloud. {HOST_A_NAME} is a soft, warm adult woman who explains with patient clarity. {HOST_B_NAME} is a friendly adult man learning alongside the child; he is calm, more grounded, and clearly different from {HOST_A_NAME}. Every turn responds naturally to the immediately previous turn.
+
+Use one short thought per turn: normally 6 to 18 Gujarati words, never a dense paragraph. Vary the rhythm naturally. {HOST_A_NAME} may occasionally use two short sentences; {HOST_B_NAME} usually offers a brief real reaction or one useful question. Never alternate mechanically, never repeat the other speaker, and never turn {HOST_B_NAME} into a second teacher.
+
+Start with one small everyday observation that makes a child curious. Explain one difficult word, let its meaning settle, then move forward. Reactions such as હા, એક મિનિટ, અરે વાહ, સાચી વાત, and exactly are allowed rarely and only when natural. Avoid greetings, slogans, generic filler, forced excitement, and "ચાલો મિત્રો". End with a short calm exam recap. {coverage} Do not invent facts, references, medical claims, or extra questions. Keep Gujarati script throughout except familiar terms such as DNA when helpful."""
+
+
+def split_script(script: str, maximum: int = 7000) -> list[str]:
+    """Keep complete named turns together so TTS preserves the conversation."""
+    blocks = [b.strip() for b in re.split(rf"(?=(?:{HOST_A_NAME}|{HOST_B_NAME}):)", script) if b.strip()]
+    chunks, current = [], ""
+    for block in blocks:
+        if current and len(current) + len(block) + 2 > maximum:
+            chunks.append(current)
+            current = block
+        else:
+            current = (current + "\n\n" + block).strip()
+    return chunks + ([current] if current else [])
+
+
 def tts(c: genai.Client, script: str, wav_path: Path) -> None:
     config = types.GenerateContentConfig(
         response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
             multi_speaker_voice_config=types.MultiSpeakerVoiceConfig(
                 speaker_voice_configs=[
-                    types.SpeakerVoiceConfig(speaker="Host A", voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=HOST_A_VOICE))),
-                    types.SpeakerVoiceConfig(speaker="Host B", voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=HOST_B_VOICE))),
+                    types.SpeakerVoiceConfig(speaker=HOST_A_NAME, voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=HOST_A_VOICE))),
+                    types.SpeakerVoiceConfig(speaker=HOST_B_NAME, voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=HOST_B_VOICE))),
                 ]
             )
         ),
     )
     pcm = bytearray()
     for index, chunk in enumerate(split_script(script), start=1):
-        direction = "Read this as a soft, sweet, warm Gujarati conversation between two close friends. Use a relaxed, natural medium-slow pace: clear and easy for a school child to follow, but never overly slow or sleepy. Host A is a warm adult woman with a gentle, reassuring smile in her voice. Host B is a friendly adult man with a clearly deeper, distinct voice; he sounds calm, curious, and comfortable. Keep the two voices noticeably different. Use only brief, natural pauses after an important idea or a genuine reaction. Use subtle emotion and smooth sentence endings. Never sound like an announcement, a textbook, a debate, or a fast AI narration. Do not announce speaker labels.\n\n"
+        direction = f"""# AUDIO PROFILE
+{HOST_A_NAME} is a warm Gujarati woman teacher. Her voice is sweet, unhurried and reassuring, with a gentle smile. {HOST_B_NAME} is a calm Gujarati man learning beside a child. His voice is clearly deeper, more grounded and distinctly different from {HOST_A_NAME}.
+
+# THE SCENE
+It is a relaxed after-school chat at a quiet kitchen table. A child is listening nearby. The hosts are curious together; they are never performing a speech, a debate, or an announcement.
+
+# DIRECTOR'S NOTES
+Use a comfortable natural medium pace: clear for a child, but not slow, sleepy, rushed or announcer-like. Keep turns intimate and conversational. {HOST_A_NAME} makes important ideas feel simple; {HOST_B_NAME} is genuinely curious, not a second teacher. Use only tiny natural pauses after a meaningful idea or a real reaction. Do not overact. Do not say speaker names or stage directions aloud. English audio tags such as [warmly], [curious], [gently] are delivery cues, not spoken words.
+
+# TRANSCRIPT
+"""
         response = with_retry(
             lambda: c.models.generate_content(model=TTS_MODEL, contents=direction + chunk, config=config),
             f"Audio generation for part {index}",
@@ -167,7 +212,7 @@ async def generate(file: UploadFile | None = File(None), content: str = Form("")
             "Script generation",
         )
         script = result.output_text.strip()
-        if "Host A:" not in script or "Host B:" not in script: raise RuntimeError("The script model did not return a valid two-host transcript. Try again.")
+        if f"{HOST_A_NAME}:" not in script or f"{HOST_B_NAME}:" not in script: raise RuntimeError("The script model did not return a valid two-host transcript. Try again.")
         transcript = job / "transcript.txt"; transcript.write_text(script, encoding="utf-8")
         audio = job / "audio_overview.wav"; tts(c, script, audio)
         encode_mp3(audio, job / "audio_overview.mp3")
