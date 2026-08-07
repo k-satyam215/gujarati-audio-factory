@@ -41,6 +41,8 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>Gujarati Audio F
 <label>Or paste textbook content (optional)</label><textarea name=content rows=8 placeholder="Paste the question and answer, or chapter content here"></textarea>
 <label>Question or topic to explain</label><input name=question required placeholder="e.g., પ્રશ્ન 9: સંતાનમાં બે વિકલ્પો શા માટે હોય છે?"><div class=row><label>Length<select name=length><option value=default>Default (about 6-9 min)</option><option value=short>Short (about 3-4 min)</option><option value=maximum>Full chapter / Maximum (source-aware)</option></select></label><label>Output name<input name=title value="gujarati_audio_overview"></label></div>
 <button type=submit>Generate audio</button></form><p><small>Requires GEMINI_API_KEY in .env. Generation can take several minutes. Do not close the request page.</small></p></body></html>"""
+PAGE = PAGE.replace("Question or topic to explain", "Question to answer from the source (optional)")
+PAGE = PAGE.replace("name=question required", "name=question")
 
 def client() -> genai.Client:
     if not os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") == "replace_me":
@@ -120,8 +122,17 @@ def script_prompt(question: str, length: str) -> str:
         "maximum": "the longest complete, non-repetitive explanation the source genuinely needs (for a full chapter, normally 3,500 to 5,000; for a short source, stay proportional and do not pad)",
     }
     target = targets.get(length, targets["default"])
-    coverage = "Cover every relevant section and example in the supplied source; do not artificially shorten it, but do not pad, repeat, or invent material." if length == "maximum" else "Focus tightly on the stated topic and source-grounded examples."
-    return f"""You are an expert Gujarati school science educator. Based only on the supplied source, write a {target}-word Gujarati podcast transcript answering: {question}.
+    question_mode = (
+        f"""A learner asks this question about the source: {question}
+
+First understand the complete source and the question silently. Answer through the relevant events, characters, facts, causes, and examples in the source. Do not merely read the question and give a one-line answer. Explain the source details that show why the answer is true. If it is a story question, naturally retell the relevant story moments before making the answer clear. Never invent an event, character, fact, or moral absent from the source."""
+        if question.strip() else
+        """No separate question was supplied. Explain or narrate the entire source in a warm child-friendly way, preserving its important events, characters, ideas, and cause-and-effect without inventing anything."""
+    )
+    coverage = "Cover every relevant section and example in the supplied source; do not artificially shorten it, but do not pad, repeat, or invent material." if length == "maximum" else "Focus tightly on the source details that answer the question, or on the main source ideas when there is no question."
+    return f"""You are an expert Gujarati school educator and story explainer. {question_mode}
+
+Based only on the supplied source, write a {target}-word Gujarati two-host teaching audio transcript.
 
 Output ONLY spoken lines. Use exactly two speakers called {HOST_A_NAME} and {HOST_B_NAME}; format every turn exactly `{HOST_A_NAME}:` or `{HOST_B_NAME}:`.
 
@@ -198,7 +209,7 @@ def encode_mp3(wav_path: Path, mp3_path: Path) -> None:
 def home(): return PAGE
 
 @app.post("/generate", response_class=HTMLResponse)
-async def generate(file: UploadFile | None = File(None), content: str = Form(""), question: str = Form(...), length: str = Form("default"), title: str = Form("audio_overview")):
+async def generate(file: UploadFile | None = File(None), content: str = Form(""), question: str = Form(""), length: str = Form("default"), title: str = Form("audio_overview")):
     safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", title).strip("_") or "audio_overview"
     job = JOBS / f"{safe}_{uuid.uuid4().hex[:8]}"; job.mkdir()
     local = None
