@@ -30,6 +30,11 @@ HOST_A_VOICE = os.getenv("HOST_A_VOICE", "Sulafat")
 HOST_B_VOICE = os.getenv("HOST_B_VOICE", "Charon")
 HOST_A_NAME = "Meera"
 HOST_B_NAME = "Arjun"
+LANGUAGE_NAMES = {
+    "gujarati": "Gujarati",
+    "hindi": "Hindi",
+    "english": "English",
+}
 
 app = FastAPI(title="Gujarati Audio Factory")
 app.mount("/jobs", StaticFiles(directory=JOBS), name="jobs")
@@ -43,6 +48,12 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>Gujarati Audio F
 <button type=submit>Generate audio</button></form><p><small>Requires GEMINI_API_KEY in .env. Generation can take several minutes. Do not close the request page.</small></p></body></html>"""
 PAGE = PAGE.replace("Question or topic to explain", "Question to answer from the source (optional)")
 PAGE = PAGE.replace("name=question required", "name=question")
+PAGE = PAGE.replace(
+    "<div class=row>",
+    """<label>Audio language<select name=language>
+    <option value=gujarati>Gujarati</option><option value=hindi>Hindi</option><option value=english>English</option>
+    </select></label><div class=row>""",
+)
 
 def client() -> genai.Client:
     if not os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") == "replace_me":
@@ -84,13 +95,14 @@ def source_part(c: genai.Client, path: Path | None, pasted: str):
         return {"type": "document", "uri": f.uri, "mime_type": f.mime_type}
     return {"type": "text", "text": path.read_text(encoding="utf-8", errors="replace")}
 
-def script_prompt(question: str, length: str) -> str:
+def script_prompt(question: str, length: str, language: str = "gujarati") -> str:
     targets = {
         "short": "450 to 600",
         "default": "1,000 to 1,250",
         "maximum": "the longest complete, non-repetitive explanation the source genuinely needs (for a full chapter, normally 3,500 to 5,000; for a short source, stay proportional and do not pad)",
     }
     target = targets.get(length, targets["default"])
+    language_name = LANGUAGE_NAMES.get(language, "Gujarati")
     coverage = "Cover every relevant section and example in the supplied source; do not artificially shorten it, but do not pad, repeat, or invent material." if length == "maximum" else "Focus tightly on the stated topic and its source-grounded examples."
     return f"""You are an expert Gujarati school science educator. Based only on the supplied source, write a {target}-word Gujarati podcast transcript answering this topic: {question}
 
@@ -114,7 +126,7 @@ def split_script(script: str, maximum: int = 9000) -> list[str]:
         chunks.append(current)
     return chunks
 
-def script_prompt(question: str, length: str) -> str:
+def script_prompt(question: str, length: str, language: str = "gujarati") -> str:
     """Generate a transcript with natural turns before TTS sees it."""
     targets = {
         "short": "450 to 600",
@@ -122,6 +134,7 @@ def script_prompt(question: str, length: str) -> str:
         "maximum": "the longest complete, non-repetitive explanation the source genuinely needs (for a full chapter, normally 3,500 to 5,000; for a short source, stay proportional and do not pad)",
     }
     target = targets.get(length, targets["default"])
+    language_name = LANGUAGE_NAMES.get(language, "Gujarati")
     question_mode = (
         f"""A learner asks this question about the source: {question}
 
@@ -130,9 +143,9 @@ First understand the complete source and the question silently. Answer through t
         """No separate question was supplied. Explain or narrate the entire source in a warm child-friendly way, preserving its important events, characters, ideas, and cause-and-effect without inventing anything."""
     )
     coverage = "Cover every relevant section and example in the supplied source; do not artificially shorten it, but do not pad, repeat, or invent material." if length == "maximum" else "Focus tightly on the source details that answer the question, or on the main source ideas when there is no question."
-    return f"""You are an expert Gujarati school educator and story explainer. {question_mode}
+    return f"""You are an expert child-friendly school educator and story explainer. {question_mode}
 
-Based only on the supplied source, write a {target}-word Gujarati two-host teaching audio transcript.
+Based only on the supplied source, write a {target}-word {language_name} two-host teaching audio transcript.
 
 Output ONLY spoken lines. Use exactly two speakers called {HOST_A_NAME} and {HOST_B_NAME}; format every turn exactly `{HOST_A_NAME}:` or `{HOST_B_NAME}:`.
 
@@ -156,7 +169,8 @@ def split_script(script: str, maximum: int = 7000) -> list[str]:
     return chunks + ([current] if current else [])
 
 
-def tts(c: genai.Client, script: str, wav_path: Path) -> None:
+def tts(c: genai.Client, script: str, wav_path: Path, language: str = "gujarati") -> None:
+    language_name = LANGUAGE_NAMES.get(language, "Gujarati")
     config = types.GenerateContentConfig(
         response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
@@ -177,6 +191,7 @@ def tts(c: genai.Client, script: str, wav_path: Path) -> None:
 It is a relaxed after-school chat at a quiet kitchen table. A child is listening nearby. The hosts are curious together; they are never performing a speech, a debate, or an announcement.
 
 # DIRECTOR'S NOTES
+Speak all dialogue naturally in {language_name}. Match the language's native rhythm, pronunciation, and everyday conversational tone.
 Use a comfortable natural medium pace: clear for a child, but not slow, sleepy, rushed or announcer-like. Keep turns intimate and conversational. {HOST_A_NAME} makes important ideas feel simple; {HOST_B_NAME} is genuinely curious, not a second teacher. Use only tiny natural pauses after a meaningful idea or a real reaction. Do not overact. Do not say speaker names or stage directions aloud. English audio tags such as [warmly], [curious], [gently] are delivery cues, not spoken words.
 
 # TRANSCRIPT
@@ -209,7 +224,7 @@ def encode_mp3(wav_path: Path, mp3_path: Path) -> None:
 def home(): return PAGE
 
 @app.post("/generate", response_class=HTMLResponse)
-async def generate(file: UploadFile | None = File(None), content: str = Form(""), question: str = Form(""), length: str = Form("default"), title: str = Form("audio_overview")):
+async def generate(file: UploadFile | None = File(None), content: str = Form(""), question: str = Form(""), language: str = Form("gujarati"), length: str = Form("default"), title: str = Form("audio_overview")):
     safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", title).strip("_") or "audio_overview"
     job = JOBS / f"{safe}_{uuid.uuid4().hex[:8]}"; job.mkdir()
     local = None
@@ -219,13 +234,13 @@ async def generate(file: UploadFile | None = File(None), content: str = Form("")
     try:
         c = client(); source = source_part(c, local, content)
         result = with_retry(
-            lambda: c.interactions.create(model=TEXT_MODEL, input=[source, {"type": "text", "text": script_prompt(question, length)}]),
+            lambda: c.interactions.create(model=TEXT_MODEL, input=[source, {"type": "text", "text": script_prompt(question, length, language)}]),
             "Script generation",
         )
         script = result.output_text.strip()
         if f"{HOST_A_NAME}:" not in script or f"{HOST_B_NAME}:" not in script: raise RuntimeError("The script model did not return a valid two-host transcript. Try again.")
         transcript = job / "transcript.txt"; transcript.write_text(script, encoding="utf-8")
-        audio = job / "audio_overview.wav"; tts(c, script, audio)
+        audio = job / "audio_overview.wav"; tts(c, script, audio, language)
         encode_mp3(audio, job / "audio_overview.mp3")
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
