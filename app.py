@@ -153,7 +153,7 @@ This must feel like a gentle after-school chat, never a lesson being read aloud.
 
 Use one short thought per turn: normally 6 to 18 Gujarati words, never a dense paragraph. Vary the rhythm naturally. {HOST_A_NAME} may occasionally use two short sentences; {HOST_B_NAME} usually offers a brief real reaction or one useful question. Never alternate mechanically, never repeat the other speaker, and never turn {HOST_B_NAME} into a second teacher.
 
-Start with one small everyday observation that makes a child curious. Explain one difficult word, let its meaning settle, then move forward. Reactions such as હા, એક મિનિટ, અરે વાહ, સાચી વાત, and exactly are allowed rarely and only when natural. Avoid greetings, slogans, generic filler, forced excitement, and "ચાલો મિત્રો". End with a short calm exam recap. {coverage} Do not invent facts, references, medical claims, or extra questions. Keep Gujarati script throughout except familiar terms such as DNA when helpful."""
+Start with one small everyday observation that makes a child curious. Explain one difficult word, let its meaning settle, then move forward. Reactions must be native and natural in {language_name}; do not reuse Gujarati filler words in Hindi or English. Avoid greetings, slogans, generic filler, forced excitement, and mechanical turns. End with a short calm recap that directly answers the supplied question when there is one. {coverage} Do not invent facts, references, medical claims, or extra questions. CRITICAL: write every spoken line exclusively in {language_name}; never output Gujarati unless {language_name} is Gujarati. Keep only universally familiar terms such as DNA when helpful."""
 
 
 def split_script(script: str, maximum: int = 7000) -> list[str]:
